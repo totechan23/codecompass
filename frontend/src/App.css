@@ -1021,3 +1021,322 @@ input:focus-visible {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ================================
+   GOD MODE — CRIMSON CONTROL ROOM
+   ================================ */
+
+.god-mode {
+  --bg: #090304;
+  --surface: #100708;
+  --surface-raised: #19090c;
+  --border: #492027;
+  --text: #fff0f1;
+  --muted: #c09a9e;
+  --dim: #86666b;
+  --accent: #ff3b4f;
+  --accent-dark: #d51d35;
+
+  position: relative;
+  isolation: isolate;
+  background:
+    radial-gradient(ellipse at 50% 0%, #54121e55, transparent 48%),
+    radial-gradient(ellipse at 100% 40%, #3b081522, transparent 45%),
+    #090304;
+  animation: god-mode-enter 350ms ease-out both;
+}
+
+.god-mode::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.16;
+  background-image:
+    linear-gradient(#ff36430b 1px, transparent 1px),
+    linear-gradient(90deg, #ff36430b 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+@keyframes god-mode-enter {
+  from { opacity: 0.75; filter: saturate(0.4); }
+  to { opacity: 1; filter: saturate(1); }
+}
+
+.god-mode .topbar,
+.god-mode .footer {
+  border-color: #57212a;
+}
+
+.god-mode .brand-mark {
+  border-color: #a42b3d;
+  box-shadow: 0 0 15px #ff25331c;
+}
+
+.god-mode .brand-mark span,
+.god-mode .footer-brand,
+.god-mode .intro h1 em,
+.god-mode .intro > .eyebrow > span {
+  color: #ff4558;
+}
+
+.god-mode .eyebrow,
+.god-mode .repo-kicker {
+  color: #d38b95;
+}
+
+.god-mode .search-box,
+.god-mode .stats-row,
+.god-mode .panel,
+.god-mode .empty-workspace,
+.god-mode .loading-panel {
+  border-color: #51232b;
+  background-color: #100708;
+  box-shadow: 0 0 22px #ff203009;
+}
+
+.god-mode .search-box:focus-within {
+  border-color: #ff4558;
+  box-shadow: 0 0 0 2px #ff33451c, 0 0 24px #ff334512;
+}
+
+.god-mode .search-box button,
+.god-mode .generate-button {
+  color: #fff7f8;
+  border-color: #ff3b4f;
+  background: #b91630;
+  box-shadow: 0 0 18px #ff253324;
+}
+
+.god-mode .search-box button:hover,
+.god-mode .generate-button:hover {
+  background: #df1d3b;
+}
+
+.god-mode .repo-avatar {
+  color: #ff5264;
+  border-color: #69232f;
+  background: #260b11;
+}
+
+.god-mode .stat {
+  border-color: #492027;
+}
+
+.god-mode .stat strong,
+.god-mode .panel-heading h3,
+.god-mode .empty-workspace h3 {
+  color: #ffe8eb;
+}
+
+.god-mode .tab.active {
+  color: #fff0f1;
+  border-bottom-color: #ff4055;
+}
+
+.god-mode .tab > span:first-child,
+.god-mode .branch-icon,
+.god-mode .empty-steps b {
+  color: #ff6373;
+}
+
+.god-mode .tab-count,
+.god-mode .count-label,
+.god-mode .public-label {
+  color: #e2a1a9;
+  border-color: #57242e;
+  background: #1c090d;
+}
+
+.god-mode .file-row:hover,
+.god-mode .issue-row:hover {
+  background: #250d12;
+}
+
+.god-mode .file-icon,
+.god-mode .file-icon.folder {
+  color: #ff6878;
+}
+
+.god-mode .guide-panel {
+  border-color: #792632;
+  background:
+    radial-gradient(ellipse at 100% 0%, #9e18251c, transparent 65%),
+    #120709;
+  box-shadow: inset 0 1px #ff526411, 0 0 28px #ff25330c;
+}
+
+.god-mode .guide-icon,
+.god-mode .guide-topline,
+.god-mode .local-tag {
+  color: #ff7886;
+}
+
+.god-mode .local-tag,
+.god-mode .guide-output,
+.god-mode .guide-foot {
+  border-color: #57212a;
+}
+
+.god-mode .copy-button,
+.god-mode .retry-button {
+  color: #ff9aa5;
+  border-color: #79303b;
+}
+
+.god-mode .copy-button:hover,
+.god-mode .retry-button:hover {
+  background: #290c12;
+}
+
+.god-mode .repo-title a,
+.god-mode .panel-heading > a {
+  color: #ff8a98;
+}
+
+.god-mode .status-dot {
+  background: #ff4b60;
+  box-shadow: 0 0 10px #ff3b4f70;
+}
+
+.god-mode .god-mode-toggle {
+  color: #fff0f1;
+  border-color: #ff4055;
+  background: #4b0c17;
+  box-shadow: 0 0 16px #ff253333, inset 0 0 12px #ff253310;
+}
+
+.god-mode .god-mode-toggle:hover {
+  background: #741124;
+}
+
+.god-mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 0 10px;
+  color: #ff9aa5;
+  background: #1b0b0e;
+  border: 1px solid #6a2933;
+  border-radius: 5px;
+  font: 9px var(--mono);
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  transition: background 180ms ease, border-color 180ms ease,
+    box-shadow 180ms ease, transform 180ms ease;
+}
+
+.god-mode-toggle:hover {
+  border-color: #ff4055;
+  background: #351017;
+  box-shadow: 0 0 15px #ff253326;
+  transform: translateY(-1px);
+}
+
+.god-mode-icon {
+  font-size: 14px;
+}
+
+@media (max-width: 520px) {
+  .god-mode-toggle {
+    min-height: 29px;
+    padding: 0 7px;
+    gap: 4px;
+    font-size: 8px;
+  }
+
+  .god-mode .topbar-right {
+    gap: 5px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .god-mode {
+    animation: none;
+  }
+}
+
+/* God Mode repository creator */
+
+.repo-creator-panel {
+  width: min(100% - 48px, 1100px);
+  margin: 0 auto 32px;
+  padding: 28px;
+}
+
+.repo-creator-form {
+  display: grid;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.repo-creator-form > label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.repo-creator-form > input:not([type="checkbox"]) {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 13px 14px;
+  border: 1px solid var(--border, #343434);
+  border-radius: 8px;
+  background: var(--surface, #151515);
+  color: inherit;
+  font: inherit;
+}
+
+.repo-visibility-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0;
+}
+
+.repo-creator-form button {
+  padding: 14px 18px;
+  border: 1px solid #ff4545;
+  border-radius: 8px;
+  background: #d92332;
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.repo-creator-form button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.repo-created-message {
+  margin-top: 20px;
+  padding: 16px;
+  border: 1px solid #3b9b69;
+  border-radius: 8px;
+}
+
+.repo-created-message p {
+  overflow-wrap: anywhere;
+}
+
+.repo-created-message a {
+  color: #73d9a0;
+}
+
+@media (max-width: 800px) {
+  .topbar-right {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+}
+
+@media (max-width: 600px) {
+  .repo-creator-panel {
+    width: calc(100% - 24px);
+    padding: 18px;
+  }
+}
