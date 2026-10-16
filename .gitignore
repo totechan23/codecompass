@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+
+# JavaScript
+node_modules/
+dist/
+
+# Backups
+src.backup/
+*.backup
+
+# Editor and system files
+.DS_Store
+.vscode/
+.idea/
