@@ -45,9 +45,20 @@ export default function App() {
     setGuide("");
 
     try {
-      const response = await fetch(
-        `${API}/analyze?url=${encodeURIComponent(url.trim())}`
-      );
+     const match = url.trim().match(
+  /^https?:\/\/github\.com\/([^/]+)\/([^/?#]+)/
+);
+
+if (!match) {
+  throw new Error("Enter a valid GitHub repository URL.");
+}
+
+const owner = match[1];
+const repository = match[2].replace(/\.git$/, "");
+
+const response = await fetch(
+  `${API}/analyze?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repository)}`
+);
 
       const data = await response.json();
 
@@ -55,7 +66,17 @@ export default function App() {
         throw new Error(data.detail || "Could not analyze repository.");
       }
 
-      setRepo(data);
+      setRepo({
+  ...data,
+  name: data.repository?.name || data.repo,
+  description: data.repository?.description || "",
+  url: data.repository?.html_url || data.url,
+  stars: data.repository?.stargazers_count ?? 0,
+  forks: data.repository?.forks_count ?? 0,
+  language: data.repository?.language || "Not specified",
+  files: Array.isArray(data.files) ? data.files : [],
+  issues: Array.isArray(data.issues) ? data.issues : [],
+});
     } catch (err) {
       setError(err.message || "Could not connect to CodeCompass API.");
     } finally {
@@ -74,7 +95,18 @@ export default function App() {
       const response = await fetch(`${API}/guide/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repo }),
+        body: JSON.stringify({
+  owner: repo.owner || repo.repository?.owner?.login || "",
+  repo: repo.repo || repo.repository?.name || "",
+  question:
+    "Explain this repository, its important files, how to run it, and how a beginner can contribute.",
+  context: JSON.stringify({
+    description: repo.repository?.description,
+    language: repo.repository?.language,
+    files: repo.files,
+    readme: repo.readme,
+  }),
+}),
       });
 
       if (!response.ok) {

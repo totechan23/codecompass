@@ -1,8 +1,7 @@
-
 import os
-import re
 import json
-from urllib.parse import urlparse
+import base64
+from typing import Optional
 
 import httpx
 from fastapi import FastAPI, HTTPException
@@ -11,54 +10,52 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 
-# -------------------- CONFIGURATION --------------------
-
-GITHUB_API = "https://api.github.com"
-OLLAMA_API = os.getenv("OLLAMA_API", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
-
-app = FastAPI(title="CodeCompass API", version="1.0.0")
+app = FastAPI(title="CodeCompass API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+GITHUB_API = "https://api.github.com"
+OLLAMA_API = os.getenv("OLLAMA_API", "http://127.0.0.1:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
 
-# -------------------- MODELS --------------------
+
+# -------------------- Request models --------------------
 
 class GuideRequest(BaseModel):
-    owner: str = ""
-    repo: str = ""
-    question: str = "Explain this repository and how to get started."
+    owner: str
+    repo: str
+    question: str = (
+        "Explain this repository, its important files, how to run it, "
+        "and how a beginner can contribute."
+    )
     context: str = ""
 
 
 class CreateRepoRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=100)
-    description: str = Field(default="", max_length=350)
+    name: str
+    description: str = ""
     private: bool = False
+    auto_init: bool = True
 
 
 class CollaboratorRequest(BaseModel):
-    owner: str = Field(min_length=1, max_length=100)
-    repo: str = Field(min_length=1, max_length=100)
-    username: str = Field(min_length=1, max_length=100)
+    owner: str
+    repo: str
+    username: str
     permission: str = "push"
 
 
-# -------------------- HELPERS --------------------
+# -------------------- GitHub helpers --------------------
 
 def github_headers():
     headers = {
         "Accept": "application/vnd.github+json",
-        "User-Agent": "CodeCompass",
         "X-GitHub-Api-Version": "2022-11-28",
     }
 
@@ -69,273 +66,368 @@ def github_headers():
     return headers
 
 
-def get_repo_coordinates(url: str):
-    parsed = urlparse(url.strip())
-
-    if parsed.hostname not in ("github.com", "www.github.com"):
-        raise HTTPException(
-            status_code=400,
-            detail="Please enter a valid GitHub repository URL.",
-        )
-
-    parts = [part for part in parsed.path.strip("/").split("/") if part]
-
-    if len(parts) < 2:
-        raise HTTPException(
-            status_code=400,
-            detail="Repository URL must include the owner and repository name.",
-        )
-
-    owner = parts[0]
-    repo = parts[1].removesuffix(".git")
-
-    if not re.fullmatch(r"[A-Za-z0-9-]+", owner):
-        raise HTTPException(status_code=400, detail="Invalid GitHub owner.")
-
-    if not re.fullmatch(r"[A-Za-z0-9._-]+", repo):
-        raise HTTPException(status_code=400, detail="Invalid repository name.")
-
-    return owner, repo
-
-
 def github_error(response):
     try:
-        data = response.json()
-        message = data.get("message", response.text)
-    except ValueError:
-        message = response.text
-
-    return str(message)
+        return response.json().get("message", response.text)
+    except Exception:
+        return response.text
 
 
-async def ollama_chat(messages, stream=False):
-    try:
-        async with httpx.AsyncClient(timeout=180) as client:
-            response = await client.post(
-                f"{OLLAMA_API}/api/chat",
-                json={
-                    "model": OLLAMA_MODEL,
-                    "messages": messages,
-                    "stream": stream,
-                },
-            )
-
-            if response.status_code >= 400:
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"Ollama error: {response.text}",
-                )
-
-            return response
-
-    except httpx.RequestError as exc:
+def validate_name(value, label):
+    value = value.strip()
+    if not value:
+        raise HTTPException(status_code=400, detail=f"{label} is required.")
+    if "/" in value:
         raise HTTPException(
-            status_code=503,
-            detail=(
-                "Could not connect to Ollama. Make sure Ollama is running "
-                f"and model '{OLLAMA_MODEL}' is installed. Details: {exc}"
-            ),
+            status_code=400,
+            detail=f"{label} must not contain '/'.",
+        )
+    return value
+
+
+async def github_get(url, params=None):
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.get(
+            url,
+            headers=github_headers(),
+            params=params,
         )
 
+    if response.status_code >= 400:
+        raise HTTPException(
+            status_code=response.status_code,
+            detail=f"GitHub API error: {github_error(response)}",
+        )
 
-# -------------------- HEALTH CHECK --------------------
+    return response.json()
+
+
+async def fetch_repo_data(owner, repo):
+    owner = validate_name(owner, "Owner")
+    repo = validate_name(repo, "Repository")
+
+    repo_data = await github_get(
+        f"{GITHUB_API}/repos/{owner}/{repo}"
+    )
+
+    tree_data = await github_get(
+        f"{GITHUB_API}/repos/{owner}/{repo}/git/trees/"
+        f"{repo_data.get('default_branch', 'main')}",
+        params={"recursive": "1"},
+    )
+
+    files = [
+        {
+            "path": item.get("path", ""),
+            "type": item.get("type", ""),
+            "size": item.get("size", 0),
+        }
+        for item in tree_data.get("tree", [])
+        if item.get("type") == "blob"
+    ]
+
+    readme = ""
+    try:
+        readme_data = await github_get(
+            f"{GITHUB_API}/repos/{owner}/{repo}/readme"
+        )
+        if readme_data.get("encoding") == "base64":
+            readme = base64.b64decode(
+                readme_data["content"]
+            ).decode("utf-8", errors="replace")
+    except HTTPException:
+        # A repository may not contain a README.
+        pass
+
+    return {
+        "owner": owner,
+        "repo": repo,
+        "url": repo_data.get("html_url", ""),
+        "repository": repo_data,
+        "files": files,
+        "readme": readme,
+    }
+
+
+# -------------------- Source code retrieval --------------------
+
+IGNORED_DIRECTORIES = {
+    "node_modules", ".git", "dist", "build", "coverage",
+    ".venv", "venv", "__pycache__", ".next", "vendor",
+}
+
+SOURCE_EXTENSIONS = (
+    ".py", ".js", ".jsx", ".ts", ".tsx", ".html", ".css",
+    ".json", ".md", ".yml", ".yaml", ".toml", ".sh",
+    ".sql", ".java", ".c", ".cpp", ".h", ".go", ".rs",
+)
+
+PRIORITY_FILES = {
+    "readme.md", "package.json", "main.py", "app.py",
+    "app.jsx", "app.js", "main.jsx", "main.js",
+    "requirements.txt", "pyproject.toml", "dockerfile",
+}
+
+
+async def fetch_source_context(owner, repo):
+    owner = validate_name(owner, "Owner")
+    repo = validate_name(repo, "Repository")
+
+    base_url = f"{GITHUB_API}/repos/{owner}/{repo}"
+
+    async with httpx.AsyncClient(
+        timeout=30,
+        headers=github_headers(),
+        follow_redirects=True,
+    ) as client:
+        repo_response = await client.get(base_url)
+
+        if repo_response.status_code >= 400:
+            raise HTTPException(
+                status_code=repo_response.status_code,
+                detail=f"GitHub error: {github_error(repo_response)}",
+            )
+
+        repo_data = repo_response.json()
+        branch = repo_data.get("default_branch", "main")
+
+        tree_response = await client.get(
+            f"{base_url}/git/trees/{branch}",
+            params={"recursive": "1"},
+        )
+
+        if tree_response.status_code >= 400:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Could not retrieve repository tree: "
+                       f"{github_error(tree_response)}",
+            )
+
+        tree_data = tree_response.json()
+        candidates = []
+
+        for item in tree_data.get("tree", []):
+            path = item.get("path", "")
+            lower_path = path.lower()
+            parts = lower_path.split("/")
+            filename = parts[-1]
+
+            if item.get("type") != "blob":
+                continue
+
+            if any(part in IGNORED_DIRECTORIES for part in parts):
+                continue
+
+            if not filename.endswith(SOURCE_EXTENSIONS):
+                continue
+
+            if item.get("size", 0) > 20000:
+                continue
+
+            score = 0
+
+            if filename in PRIORITY_FILES:
+                score += 10
+
+            if filename.startswith("readme"):
+                score += 8
+
+            if filename in {
+                "main.py", "app.py", "app.jsx", "app.js",
+                "main.jsx", "main.js",
+            }:
+                score += 5
+
+            if any(
+                part in {"src", "backend", "frontend"}
+                for part in parts[:-1]
+            ):
+                score += 3
+
+            # Extra priority for CodeCompass's known main files.
+            if lower_path == "backend/main.py":
+                score += 100
+            elif lower_path == "frontend/src/app.jsx":
+                score += 100
+
+            candidates.append((score, item))
+
+        candidates.sort(key=lambda entry: entry[0], reverse=True)
+
+        source_files = []
+        total_chars = 0
+        max_files = 12
+        max_chars = 28000
+
+        for _, item in candidates:
+            if len(source_files) >= max_files:
+                break
+            if total_chars >= max_chars:
+                break
+
+            blob_response = await client.get(
+                f"{GITHUB_API}/repos/{owner}/{repo}"
+                f"/git/blobs/{item['sha']}"
+            )
+
+            if blob_response.status_code != 200:
+                continue
+
+            blob = blob_response.json()
+
+            if blob.get("encoding") != "base64":
+                continue
+
+            try:
+                content = base64.b64decode(
+                    blob["content"]
+                ).decode("utf-8", errors="replace")
+            except (ValueError, KeyError):
+                continue
+
+            remaining = max_chars - total_chars
+            content = content[:remaining]
+
+            source_files.append(
+                f"\n--- FILE: {item['path']} ---\n"
+                f"{content}\n"
+            )
+            total_chars += len(content)
+
+        if not source_files:
+            raise HTTPException(
+                status_code=422,
+                detail="No readable source files were found.",
+            )
+
+    project_context = (
+        f"Repository: {repo_data.get('full_name')}\n"
+        f"Description: {repo_data.get('description')}\n"
+        f"Primary language: {repo_data.get('language')}\n"
+        f"Default branch: {branch}\n"
+        f"Files inspected: {len(source_files)}\n"
+        + "\n".join(source_files)
+    )
+
+    return project_context, [item.split("\n")[1] for item in source_files]
+
+
+# -------------------- Ollama helpers --------------------
+
+def build_messages(request, project_context):
+    system_prompt = """
+You are CodeCompass, a precise codebase onboarding assistant.
+
+You are given actual source code. Explain the implementation that is
+actually present, not a generic application architecture.
+
+Rules:
+- Only claim a function, variable, component, endpoint, or dependency
+  exists if it appears in the supplied source.
+- Name exact filenames and actual function names.
+- Explain actual React state variables and event handlers when present.
+- Explain actual FastAPI routes and how frontend requests connect to them.
+- Describe actual request bodies and response fields when visible.
+- Never claim App.jsx uses createRoot or StrictMode unless that code
+  appears in the supplied App.jsx source.
+- Do not invent commands, features, files, or integrations.
+- If a requested detail is missing, say it cannot be confirmed.
+- Clearly separate confirmed facts from suggestions.
+- Be specific, practical, and beginner-friendly.
+"""
+
+    user_prompt = f"""
+Analyze this repository using the source code below.
+
+Repository: {request.owner}/{request.repo}
+Question: {request.question}
+
+Additional user context:
+{request.context or "(none supplied)"}
+
+Give the answer in these sections:
+1. What the project actually does
+2. Important files and their responsibilities
+3. Verified functions, React state, and event handlers
+4. Backend routes and frontend-to-backend connections
+5. How to run it, only where supported by the files
+6. Beginner-friendly contribution ideas
+
+For every important implementation claim, mention the filename and
+the relevant function or variable. Do not substitute generic React
+setup explanations for the supplied application's actual logic.
+
+SOURCE CODE:
+{project_context}
+"""
+
+    return [
+        {"role": "system", "content": system_prompt.strip()},
+        {"role": "user", "content": user_prompt.strip()},
+    ]
+
+
+async def ollama_generate(messages):
+    async with httpx.AsyncClient(timeout=180) as client:
+        response = await client.post(
+            f"{OLLAMA_API}/api/chat",
+            json={
+                "model": OLLAMA_MODEL,
+                "messages": messages,
+                "stream": False,
+            },
+        )
+
+    if response.status_code >= 400:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Ollama error: {response.text}",
+        )
+
+    return response.json().get("message", {}).get("content", "")
+
+
+# -------------------- Basic and analysis routes --------------------
 
 @app.get("/")
-async def home():
+async def health():
     return {
-        "message": "CodeCompass API is running",
+        "status": "running",
+        "service": "CodeCompass API",
         "model": OLLAMA_MODEL,
     }
 
 
-# -------------------- REPOSITORY ANALYZER --------------------
-
-async def fetch_repo_data(url: str):
-    owner, repo_name = get_repo_coordinates(url)
-    base_url = f"{GITHUB_API}/repos/{owner}/{repo_name}"
-
-    headers = github_headers()
-
-    try:
-        async with httpx.AsyncClient(
-            timeout=25,
-            follow_redirects=True,
-            headers=headers,
-        ) as client:
-
-            repo_response = await client.get(base_url)
-
-            if repo_response.status_code == 404:
-                raise HTTPException(
-                    status_code=404,
-                    detail="Repository not found or you do not have access.",
-                )
-
-            if repo_response.status_code == 403:
-                raise HTTPException(
-                    status_code=403,
-                    detail=(
-                        "GitHub API rate limit reached or access denied. "
-                        "Check your GITHUB_TOKEN and permissions."
-                    ),
-                )
-
-            repo_response.raise_for_status()
-            repo_data = repo_response.json()
-
-            contents_response = await client.get(
-                f"{base_url}/contents"
-            )
-            contents_response.raise_for_status()
-            contents_data = contents_response.json()
-
-            files = (
-                contents_data
-                if isinstance(contents_data, list)
-                else []
-            )
-
-            issues_response = await client.get(
-                f"{base_url}/issues",
-                params={"state": "open", "per_page": 30},
-            )
-
-            issues = []
-            if issues_response.status_code == 200:
-                issues = [
-                    issue
-                    for issue in issues_response.json()
-                    if "pull_request" not in issue
-                ]
-
-            readme = ""
-            readme_response = await client.get(
-                f"{base_url}/readme"
-            )
-
-            if readme_response.status_code == 200:
-                readme_data = readme_response.json()
-                download_url = readme_data.get("download_url")
-
-                if download_url:
-                    readme_text_response = await client.get(download_url)
-                    if readme_text_response.status_code == 200:
-                        readme = readme_text_response.text
-
-            return {
-                "owner": owner,
-                "repo": repo_name,
-                "repository": repo_data,
-                "repo_data": repo_data,
-                "files": files,
-                "issues": issues,
-                "readme": readme,
-            }
-
-    except HTTPException:
-        raise
-
-    except httpx.HTTPStatusError as exc:
-        raise HTTPException(
-            status_code=exc.response.status_code,
-            detail=f"GitHub API error: {github_error(exc.response)}",
-        )
-
-    except httpx.RequestError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Could not connect to GitHub: {exc}",
-        )
-
-
 @app.get("/analyze")
-async def analyze_repo(url: str):
-    return await fetch_repo_data(url)
+async def analyze(owner: str, repo: str):
+    return await fetch_repo_data(owner, repo)
 
 
-# -------------------- AI GETTING-STARTED GUIDE --------------------
+# -------------------- AI onboarding routes --------------------
 
-@app.get("/guide")
-async def guide(url: str, question: str = "Explain this repository"):
-    repo_info = await fetch_repo_data(url)
+@app.post("/guide")
+async def guide(request: GuideRequest):
+    project_context, inspected_files = await fetch_source_context(
+        request.owner, request.repo
+    )
 
-    repo = repo_info["repository"]
-    files = repo_info["files"]
-    readme = repo_info["readme"]
-
-    file_names = [
-        item.get("path") or item.get("name", "")
-        for item in files
-    ]
-
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are CodeCompass, a helpful open-source onboarding "
-                "assistant. Explain code simply and accurately. Help "
-                "beginners understand repository structure, setup, and "
-                "contribution steps. Do not claim to have inspected files "
-                "whose contents were not provided."
-            ),
-        },
-        {
-            "role": "user",
-            "content": (
-                f"Repository: {repo.get('full_name')}\n"
-                f"Description: {repo.get('description')}\n"
-                f"Primary language: {repo.get('language')}\n"
-                f"Default branch: {repo.get('default_branch')}\n"
-                f"Root files: {json.dumps(file_names)}\n"
-                f"README (truncated):\n{readme[:12000]}\n\n"
-                f"User question: {question}"
-            ),
-        },
-    ]
-
-    response = await ollama_chat(messages)
-    data = response.json()
+    messages = build_messages(request, project_context)
+    answer = await ollama_generate(messages)
 
     return {
-        "guide": data.get("message", {}).get("content", ""),
-        "response": data.get("message", {}).get("content", ""),
-        "repository": repo_info,
+        "guide": answer,
+        "response": answer,
+        "files_inspected": inspected_files,
     }
 
 
-# -------------------- STREAMING AI GUIDE --------------------
-
 @app.post("/guide/stream")
 async def guide_stream(request: GuideRequest):
-    owner = request.owner.strip()
-    repo_name = request.repo.strip()
+    project_context, inspected_files = await fetch_source_context(
+        request.owner, request.repo
+    )
 
-    repository_context = request.context
-
-    if owner and repo_name:
-        repository_context = (
-            f"Repository: {owner}/{repo_name}\n"
-            f"{repository_context}"
-        )
-
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are CodeCompass, an open-source onboarding assistant. "
-                "Give practical, beginner-friendly answers. Use clear "
-                "steps and explain commands. Do not invent repository "
-                "details that are not included in the context."
-            ),
-        },
-        {
-            "role": "user",
-            "content": (
-                f"Repository context:\n{repository_context[:16000]}\n\n"
-                f"Question:\n{request.question}"
-            ),
-        },
-    ]
+    messages = build_messages(request, project_context)
 
     async def generate():
         try:
@@ -352,9 +444,9 @@ async def guide_stream(request: GuideRequest):
                 ) as response:
 
                     if response.status_code >= 400:
-                        error_text = await response.aread()
+                        error_body = await response.aread()
                         yield json.dumps({
-                            "error": error_text.decode(
+                            "error": error_body.decode(
                                 "utf-8", errors="replace"
                             )
                         }) + "\n"
@@ -369,8 +461,9 @@ async def guide_stream(request: GuideRequest):
                         except json.JSONDecodeError:
                             continue
 
-                        message = chunk.get("message", {})
-                        content = message.get("content", "")
+                        content = chunk.get(
+                            "message", {}
+                        ).get("content", "")
 
                         if content:
                             yield json.dumps({
@@ -379,7 +472,10 @@ async def guide_stream(request: GuideRequest):
                             }) + "\n"
 
                         if chunk.get("done"):
-                            yield json.dumps({"done": True}) + "\n"
+                            yield json.dumps({
+                                "done": True,
+                                "files_inspected": inspected_files,
+                            }) + "\n"
 
         except Exception as exc:
             yield json.dumps({"error": str(exc)}) + "\n"
@@ -387,149 +483,98 @@ async def guide_stream(request: GuideRequest):
     return StreamingResponse(
         generate(),
         media_type="application/x-ndjson",
-        headers={"Cache-Control": "no-cache"},
     )
 
 
-# -------------------- CREATE GITHUB REPOSITORY --------------------
+# -------------------- GitHub repository creation --------------------
 
 @app.post("/github/repos")
 async def create_github_repo(request: CreateRepoRequest):
     token = os.getenv("GITHUB_TOKEN")
-
     if not token:
         raise HTTPException(
-            status_code=500,
-            detail="GITHUB_TOKEN is missing. Start the backend with your GitHub CLI token.",
+            status_code=401,
+            detail="GITHUB_TOKEN is not set in the backend environment.",
         )
 
-    name = request.name.strip()
-
-    if not re.fullmatch(r"[A-Za-z0-9._-]+", name):
-        raise HTTPException(
-            status_code=400,
-            detail="Use only letters, numbers, dots, underscores, and hyphens in the repository name.",
-        )
+    name = validate_name(request.name, "Repository name")
 
     payload = {
         "name": name,
         "description": request.description,
         "private": request.private,
-        "auto_init": True,
+        "auto_init": request.auto_init,
     }
 
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post(
-                f"{GITHUB_API}/user/repos",
-                headers=github_headers(),
-                json=payload,
-            )
-
-            if response.status_code not in (200, 201):
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=f"Could not create repository: {github_error(response)}",
-                )
-
-            data = response.json()
-
-            return {
-                "success": True,
-                "message": "Repository created successfully.",
-                "name": data.get("name"),
-                "full_name": data.get("full_name"),
-                "html_url": data.get("html_url"),
-                "clone_url": data.get("clone_url"),
-                "private": data.get("private"),
-                "default_branch": data.get("default_branch"),
-            }
-
-    except HTTPException:
-        raise
-
-    except httpx.RequestError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Could not connect to GitHub: {exc}",
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.post(
+            f"{GITHUB_API}/user/repos",
+            headers=github_headers(),
+            json=payload,
         )
 
+    if response.status_code >= 400:
+        raise HTTPException(
+            status_code=response.status_code,
+            detail=f"GitHub error: {github_error(response)}",
+        )
 
-# -------------------- ADD GITHUB COLLABORATOR --------------------
+    return response.json()
+
+
+# -------------------- Collaborator invitations --------------------
 
 @app.post("/github/collaborators")
 async def add_collaborator(request: CollaboratorRequest):
     if not os.getenv("GITHUB_TOKEN"):
         raise HTTPException(
-            status_code=500,
-            detail="GITHUB_TOKEN is missing. Restart the backend with your GitHub CLI token.",
+            status_code=401,
+            detail="GITHUB_TOKEN is not set in the backend environment.",
         )
 
-    owner = request.owner.strip()
-    repo = request.repo.strip()
-    username = request.username.strip()
-    permission = request.permission.strip().lower()
+    owner = validate_name(request.owner, "Owner")
+    repo = validate_name(request.repo, "Repository")
+    username = validate_name(request.username, "Username")
 
-    if not re.fullmatch(r"[A-Za-z0-9-]+", owner):
-        raise HTTPException(status_code=400, detail="Invalid repository owner.")
-
-    if not re.fullmatch(r"[A-Za-z0-9._-]+", repo):
-        raise HTTPException(status_code=400, detail="Invalid repository name.")
-
-    if not re.fullmatch(r"[A-Za-z0-9-]+", username):
-        raise HTTPException(status_code=400, detail="Invalid GitHub username.")
-
-    allowed_permissions = {
-        "pull",
-        "triage",
-        "push",
-        "maintain",
-        "admin",
-    }
+    allowed_permissions = {"pull", "triage", "push", "maintain", "admin"}
+    permission = request.permission.lower().strip()
 
     if permission not in allowed_permissions:
         raise HTTPException(
             status_code=400,
-            detail="Invalid permission. Choose pull, triage, push, maintain, or admin.",
+            detail="Permission must be pull, triage, push, maintain, or admin.",
         )
 
-    url = (
-        f"{GITHUB_API}/repos/{owner}/{repo}"
-        f"/collaborators/{username}"
-    )
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.put(
+            f"{GITHUB_API}/repos/{owner}/{repo}"
+            f"/collaborators/{username}",
+            headers=github_headers(),
+            json={"permission": permission},
+        )
 
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.put(
-                url,
-                headers=github_headers(),
-                json={"permission": permission},
-            )
-
-            if response.status_code not in (201, 204):
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=f"GitHub could not add the collaborator: {github_error(response)}",
-                )
-
-            return {
-                "success": True,
-                "message": (
-                    f"Invitation sent to {username} for {owner}/{repo}."
-                ),
-                "username": username,
-                "repository": f"{owner}/{repo}",
-                "permission": permission,
-                "invitation_url": (
-                    f"https://github.com/{owner}/{repo}/settings/access"
-                ),
-            }
-
-    except HTTPException:
-        raise
-
-    except httpx.RequestError as exc:
+    if response.status_code >= 400:
         raise HTTPException(
-            status_code=502,
-            detail=f"Could not connect to GitHub: {exc}",
+            status_code=response.status_code,
+            detail=f"GitHub error: {github_error(response)}",
         )
+
+    if response.status_code == 204:
+        return {
+            "success": True,
+            "message": f"Invitation or collaborator update sent to {username}.",
+            "owner": owner,
+            "repo": repo,
+            "username": username,
+            "permission": permission,
+        }
+
+    return {
+        "success": True,
+        "message": f"GitHub processed the collaborator request for {username}.",
+        "owner": owner,
+        "repo": repo,
+        "username": username,
+        "permission": permission,
+        "github_response": response.json(),
+    }
