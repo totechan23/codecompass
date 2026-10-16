@@ -1,6 +1,7 @@
 
 import { useState } from "react";
 import "./App.css";
+import ArchitectureMap from "./ArchitectureMap";
 
 const API = "http://127.0.0.1:8000";
 
@@ -261,46 +262,80 @@ const files = repo?.files || [];
             onClick={() => setGodMode((active) => !active)}
             aria-pressed={godMode}
           >
-            <span className="god-mode-icon">✳</span>
+            <span className="god-mode-icon">CC</span>
             {godMode ? "EXIT GOD MODE" : "GOD MODE"}
           </button>
 
-
-{godMode && (
-  <button
-    type="button"
-    className="god-mode-toggle"
-    onClick={() => {
-      setShowRepoCreator((visible) => !visible);
-      setCreateRepoError("");
-    }}
-  >
-    {showRepoCreator
-      ? "CLOSE REPO CREATOR"
-      : "+ CREATE REPOSITORY"}
-  </button>
-)}
-
-{godMode && (
-  <button
-    type="button"
-    className="god-mode-toggle"
-    onClick={() => {
-      setShowCollaborators((visible) => !visible);
-      setCollabError("");
-      setCollabResult(null);
-    }}
-  >
-    {showCollaborators
-      ? "CLOSE COLLABORATORS"
-      : "+ MANAGE COLLABORATORS"}
-  </button>
-)}
 
         </div>
       </header>
 
       <main className="main-content">
+
+      {godMode && (
+        <section className="god-mode-hub">
+          <div className="god-mode-hub-head">
+            <div className="eyebrow">
+              <span className="god-mode-pulse" />
+              GOD MODE / CONTROL CENTER
+            </div>
+            <h2>Build your open-source <em>empire.</em></h2>
+            <p>
+              Create repositories, bring your team together, and get your
+              next project moving.
+            </p>
+          </div>
+
+          <div className="god-mode-actions">
+            <button
+              type="button"
+              className="god-action-card create-action"
+              onClick={() => {
+                setShowRepoCreator((visible) => !visible);
+                setCreateRepoError("");
+              }}
+              aria-expanded={showRepoCreator}
+            >
+              <span className="god-action-icon">＋</span>
+              <span className="god-action-copy">
+                <small>01 / REPOSITORIES</small>
+                <strong>
+                  {showRepoCreator ? "Close repository creator" : "Create a repository"}
+                </strong>
+                <span>Launch a project with your own settings.</span>
+              </span>
+              <span className="god-action-arrow">↗</span>
+            </button>
+
+            <button
+              type="button"
+              className="god-action-card contributor-action"
+              onClick={() => {
+                setShowCollaborators((visible) => !visible);
+                setCollabError("");
+                setCollabResult(null);
+              }}
+              aria-expanded={showCollaborators}
+            >
+              <span className="god-action-icon">⌘</span>
+              <span className="god-action-copy">
+                <small>02 / TEAM ACCESS</small>
+                <strong>
+                  {showCollaborators ? "Close contributor manager" : "Invite contributors"}
+                </strong>
+                <span>Bring collaborators into your repository.</span>
+              </span>
+              <span className="god-action-arrow">↗</span>
+            </button>
+          </div>
+          <div className="god-mode-hub-foot">
+            <span className="god-mode-pulse" />
+            POWER TOOLS ENABLED
+            <span>GITHUB CONNECTED WORKFLOW</span>
+          </div>
+        </section>
+      )}
+
       
         {godMode && showCollaborators && (
           <section className="panel repo-creator-panel">
@@ -616,6 +651,14 @@ const files = repo?.files || [];
 
                 <div className="tabs">
                   <button
+                    className={activeTab === "architecture" ? "tab active" : "tab"}
+                    onClick={() => setActiveTab("architecture")}
+                    type="button"
+                  >
+                    Architecture
+                  </button>
+
+                  <button
                     className={
                       activeTab === "files" ? "tab active" : "tab"
                     }
@@ -638,7 +681,9 @@ const files = repo?.files || [];
                   </button>
                 </div>
 
-                {activeTab === "files" ? (
+                {activeTab === "architecture" ? (
+                  <ArchitectureMap repo={repo} onBack={() => setActiveTab("files")} />
+                ) : activeTab === "files" ? (
                   <div className="file-list">
                     {files.slice(0, 35).map((file, index) => {
                       const path =
@@ -710,7 +755,7 @@ const files = repo?.files || [];
 
               <aside className="panel guide-panel">
                 <div className="guide-topline">
-                  <span className="guide-icon">✳</span>
+                  <span className="guide-icon">CC</span>
                   <span>CODECOMPASS GUIDE</span>
                   <span className="local-tag">LOCAL AI</span>
                 </div>

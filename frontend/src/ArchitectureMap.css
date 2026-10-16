@@ -1,0 +1,155 @@
+.architecture-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100dvh;
+  padding: 18px 22px;
+  color: #f0edf8;
+  background: #0c0c10;
+  overflow: hidden;
+}
+.architecture-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  flex: 0 0 auto;
+  padding-bottom: 15px;
+  border-bottom: 1px solid #292630;
+}
+.architecture-back-button, .explain-file-button {
+  padding: 10px 13px;
+  color: #eee8ff;
+  background: #1c1924;
+  border: 1px solid #41394f;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.architecture-back-button:hover, .explain-file-button:hover {
+  border-color: #a58ce8;
+  background: #282132;
+}
+.architecture-title { flex: 1; text-align: center; }
+.architecture-title span, .inspector-eyebrow {
+  color: #a99bd0;
+  font: 9px var(--mono, monospace);
+  letter-spacing: 1.3px;
+}
+.architecture-title h2 { margin: 5px 0 0; font-size: 19px; }
+.architecture-topbar > a, .inspector-github-link {
+  color: #c5b4ff;
+  font-size: 12px;
+  text-decoration: none;
+}
+.architecture-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 13px 0;
+  flex: 0 0 auto;
+}
+.architecture-toolbar input, .architecture-toolbar select {
+  min-height: 36px;
+  padding: 0 11px;
+  color: #f0edf8;
+  background: #17161d;
+  border: 1px solid #37313f;
+  border-radius: 6px;
+}
+.architecture-toolbar input { width: min(360px, 100%); }
+.architecture-toolbar select { max-width: 210px; }
+.architecture-toolbar span { margin-left: auto; color: #9891a4; font: 10px var(--mono, monospace); }
+.architecture-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+}
+.architecture-flow {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid #2b2733;
+  border-radius: 9px;
+  background: #101015;
+}
+.architecture-flow .react-flow { width: 100%; height: 100%; }
+.architecture-flow .react-flow__node { font-family: "DM Sans", sans-serif; }
+.graph-node-content { display: flex; flex-direction: column; gap: 5px; overflow: hidden; }
+.graph-node-content strong { overflow: hidden; color: #f0edf8; font-size: 12px; text-overflow: ellipsis; }
+.graph-node-content small { overflow: hidden; color: #9e97ac; font-size: 9px; text-overflow: ellipsis; }
+.graph-node-language { color: #9f8bdd; font: 8px var(--mono, monospace); text-transform: uppercase; }
+.architecture-map-note {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  max-width: 75%;
+  padding: 8px 10px;
+  color: #c2bacc;
+  background: #17151dcc;
+  border: 1px solid #383143;
+  border-radius: 6px;
+  font-size: 10px;
+  pointer-events: none;
+}
+.architecture-inspector {
+  min-width: 0;
+  overflow: auto;
+  padding: 18px;
+  background: #151419;
+  border: 1px solid #302b37;
+  border-radius: 9px;
+}
+.architecture-inspector h3 { margin: 13px 0 8px; overflow-wrap: anywhere; font-size: 18px; }
+.inspector-path {
+  display: block;
+  color: #a9a2b6;
+  font-size: 10px;
+  overflow-wrap: anywhere;
+  line-height: 1.7;
+}
+.inspector-section { margin-top: 22px; }
+.inspector-section label {
+  display: block;
+  margin-bottom: 8px;
+  color: #8d849d;
+  font: 9px var(--mono, monospace);
+  letter-spacing: 1px;
+}
+.inspector-section strong { color: #e6dfff; font-size: 12px; }
+.inspector-section p {
+  color: #c2bdcb;
+  font-size: 12px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.inspector-explanation {
+  padding: 12px;
+  background: #1d1a24;
+  border: 1px solid #342d40;
+  border-radius: 7px;
+}
+.inspector-footer {
+  margin-top: 28px;
+  padding-top: 14px;
+  border-top: 1px solid #302b37;
+  color: #81798d;
+  font-size: 10px;
+  line-height: 1.8;
+}
+.architecture-loading, .architecture-error { padding: 18px; color: #bcb4cc; font-size: 12px; }
+.architecture-error { color: #ffabb4; }
+@media (max-width: 850px) {
+  .architecture-screen { padding: 10px; }
+  .architecture-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(260px, 1fr) auto; }
+  .architecture-inspector { max-height: 34vh; }
+  .architecture-title { text-align: left; }
+  .architecture-title span { display: none; }
+}

@@ -149,6 +149,200 @@ async def fetch_repo_data(owner, repo):
     }
 
 
+
+
+
+import re
+import asyncio
+
+def architecture_language(path):
+    ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
+    return {
+        "py": "Python", "js": "JavaScript", "jsx": "React JSX",
+        "ts": "TypeScript", "tsx": "React TSX", "css": "CSS",
+        "html": "HTML", "json": "JSON", "md": "Markdown",
+        "java": "Java", "go": "Go", "rs": "Rust",
+        "c": "C", "cpp": "C++", "sql": "SQL",
+    }.get(ext, "Other")
+
+
+def architecture_purpose(path):
+    name = path.lower().split("/")[-1]
+    if name in {"main.py", "app.py", "server.py"}:
+        return "Possible backend entry point."
+    if name in {"app.jsx", "app.tsx", "app.js", "app.ts"}:
+        return "Possible main frontend component."
+    if name in {"package.json", "requirements.txt", "pyproject.toml"}:
+        return "Project dependencies and configuration."
+    if name.startswith("readme"):
+        return "Project documentation."
+    if name.endswith(".css"):
+        return "Visual styles and layout."
+    if name.endswith((".jsx", ".tsx", ".html")):
+        return "Frontend interface or markup."
+    if name.endswith(".py"):
+        return "Python source module."
+    return "Source or configuration file."
+
+
+def resolve_import(source, specifier, known):
+    if not specifier.startswith("."):
+        return None
+    import posixpath
+    base = posixpath.normpath(
+        posixpath.join(posixpath.dirname(source), specifier)
+    )
+    candidates = [
+        base, base + ".js", base + ".jsx", base + ".ts",
+        base + ".tsx", base + ".py", base + ".css",
+        base + ".json",
+        posixpath.join(base, "index.js"),
+        posixpath.join(base, "index.jsx"),
+        posixpath.join(base, "index.ts"),
+        posixpath.join(base, "index.tsx"),
+    ]
+    return next((item for item in candidates if item in known), None)
+
+
+@app.get("/architecture")
+async def repository_architecture(owner: str, repo: str):
+    data = await fetch_repo_data(owner, repo)
+    files = data.get("files", [])
+    branch = data.get("repository", {}).get("default_branch", "main")
+    paths = [
+        item["path"] for item in files
+        if item.get("path", "").lower().endswith(
+            (".py", ".js", ".jsx", ".ts", ".tsx", ".css",
+             ".html", ".java", ".go", ".rs")
+        )
+        and not any(part in {
+            "node_modules", ".git", "dist", "build", ".venv", "vendor"
+        } for part in item.get("path", "").split("/"))
+    ][:100]
+
+    contents = {}
+    semaphore = asyncio.Semaphore(10)
+
+    async def fetch_source(client, path):
+        async with semaphore:
+            url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}"
+            try:
+                response = await client.get(url)
+                if response.status_code == 200:
+                    contents[path] = response.text[:16000]
+            except httpx.HTTPError:
+                pass
+
+    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+        await asyncio.gather(
+            *(fetch_source(client, path) for path in paths)
+        )
+
+    known = set(paths)
+    nodes = []
+    edges = []
+    seen = set()
+
+    for path in paths:
+        nodes.append({
+            "id": path,
+            "label": path.split("/")[-1],
+            "path": path,
+            "language": architecture_language(path),
+            "purpose": architecture_purpose(path),
+            "size": len(contents.get(path, "")),
+            "url": f"https://github.com/{owner}/{repo}/blob/{branch}/{path}",
+        })
+
+    patterns = [
+        r"(?m)^\s*import\s+.*?\s+from\s+['\"]([^'\"]+)['\"]",
+        r"(?m)^\s*import\s+['\"]([^'\"]+)['\"]",
+        r"(?m)^\s*export\s+.*?\s+from\s+['\"]([^'\"]+)['\"]",
+        r"(?m)^\s*(?:const|let|var)\s+.*?=\s*require\(['\"]([^'\"]+)['\"]\)",
+    ]
+
+    for source, content in contents.items():
+        for pattern in patterns:
+            for match in re.finditer(pattern, content):
+                target = resolve_import(source, match.group(1), known)
+                if target and target != source and (source, target) not in seen:
+                    seen.add((source, target))
+                    edges.append({
+                        "id": source + "->" + target,
+                        "source": source,
+                        "target": target,
+                        "kind": "dependency",
+                        "label": "imports",
+                    })
+
+    return {
+        "owner": owner,
+        "repo": repo,
+        "url": data.get("url", ""),
+        "branch": branch,
+        "nodes": nodes,
+        "edges": edges,
+        "total_files": len(files),
+        "inspected_files": len(contents),
+        "truncated": len(paths) < len(files),
+    }
+
+
+@app.post("/architecture/explain")
+async def explain_architecture_file(payload: dict):
+    owner = validate_name(str(payload.get("owner", "")), "Owner")
+    repo = validate_name(str(payload.get("repo", "")), "Repository")
+    path = str(payload.get("path", "")).strip()
+
+    if not path or path.startswith("/") or ".." in path.split("/"):
+        raise HTTPException(status_code=400, detail="Invalid file path.")
+
+    metadata = await github_get(f"{GITHUB_API}/repos/{owner}/{repo}")
+    branch = metadata.get("default_branch", "main")
+    url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}"
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.get(url)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="Could not retrieve source file.") from exc
+
+    if response.status_code != 200:
+        raise HTTPException(status_code=404, detail="Could not retrieve source file.")
+
+    language = architecture_language(path)
+    prompt = (
+        "Explain this source file to a beginner. Use headings PURPOSE, "
+        "HOW IT WORKS, and IMPORTANT DETAILS. Be specific and do not invent behavior.\n"
+        f"Repository: {owner}/{repo}\nPath: {path}\nLanguage: {language}\n"
+        f"Source code:\n{response.text[:8000]}"
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=90) as client:
+            result = await client.post(
+                f"{OLLAMA_API}/api/generate",
+                json={
+                    "model": OLLAMA_MODEL,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {"num_predict": 220, "temperature": 0.2},
+                },
+            )
+        if result.status_code >= 400:
+            raise HTTPException(status_code=502, detail="Ollama could not explain this file.")
+        explanation = result.json().get("response", "").strip()
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="Could not connect to Ollama.") from exc
+
+    return {
+        "path": path,
+        "language": language,
+        "purpose": architecture_purpose(path),
+        "explanation": explanation or "No explanation returned.",
+    }
+
+
 # -------------------- Source code retrieval --------------------
 
 IGNORED_DIRECTORIES = {
